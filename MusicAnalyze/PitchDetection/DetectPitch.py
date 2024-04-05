@@ -1,15 +1,22 @@
 import numpy as np
+import copy
+import math
+import matplotlib.pyplot as pyplot
 import librosa
 import AudioUtil.DataStructures.plot as plt
-import matplotlib.pyplot as pyplot
-from matplotlib.axes import Axes
 from AudioUtil.DataStructures.AudioSignal import AudioSignal, AudioSignal_FromFile
 from AudioUtil.DataStructures.plot import CustomFig
-from AudioUtil.DataStructures.note_list import NOTE_FREQS, ClosestNoteFromFreq
-from AudioUtil.DataStructures.FFT import FFT
-import AudioUtil.DataStructures.output as out
-from AudioUtil.MusicAnalyze.util import SignalEnvelope, GetPeakIndices, Normalize, ACF, PitchContour
-import copy
+from AudioUtil.MusicAnalyze.util import StdDeviation, RemoveDC, EmptyArr, sec2samp, Signal_Mean_StdDev
+from scipy.signal import savgol_filter # filter out the noise
+from AudioUtil.MusicAnalyze.PitchDetection.YINalg import yin
+from AudioUtil.MusicAnalyze.PitchDetection.SilenceDetect import DetectSilence
+from sound_to_midi.monophonic import wave_to_midi
+
+NONE = 0
+START_TRANSITION = 1
+END_TRANSITION = 2
+ONSET = 3
+OFFSET = 4
 
 def GetHarmonicIndices(peak_indices: list[int], F: np.ndarray, DIFF=40) -> list[float]:
   '''
@@ -42,235 +49,428 @@ def GetHarmonicIndices(peak_indices: list[int], F: np.ndarray, DIFF=40) -> list[
   #----------------------------------------
   return harmonics
 
+def ToNearestNotes(PITCH: np.ndarray) -> np.ndarray:
+    out = PITCH[:]
+    i = 0
+    for pitch in PITCH:
+        try:
+            note = librosa.hz_to_note(int(round(pitch)))
+            note_hz = librosa.note_to_hz(note)
+        except:
+            note_hz = 0
+        out[i] = note_hz
+        i+=1
+    return out
+
+class PointInfo:
+    def __init__(self, pitch: float, cnt: int):
+        self.pitch = pitch
+        self.cnt = cnt
+        self.long = False
+
+def RemoveQuickPitchChange(PITCH: np.ndarray, PITCH_T: np.ndarray, dT=0.1):
+    '''
+        We could have short deviations within short deviations
+        maintain a stack
+        top of th stack:
+        - current value we are on
+        - cnt of the value
+        - from-value
+    '''
+
+    N = PITCH.size
+    fs = PITCH.size / PITCH_T[-1]
+    dS = sec2samp(dT, fs)
+
+    stack: list[PointInfo] = []
+
+    for i in range(N):
+        p = PITCH[i]
+        if len(stack) == 0:
+            print(f'stack.len == 0')
+            stack.append(PointInfo(p, 1))
+            continue
+        # <- item on the stack
+        top = stack[-1]
+        if p == top.pitch:
+            top.cnt += 1
+            if not top.long and top.cnt >= dS:
+                # <- long enough to keep
+                top.long = True
+                print(f'top.long <- true')
+        else:
+            # <- might not be a <last> item
+            if len(stack) == 1:
+                # <- first new pitch discovered
+                print(f'stack.len == 1')
+                stack.append(PointInfo(p, 1))
+            else:
+                last = stack[-2]
+                if p == last.pitch:
+                    # <- deviated from the last pitch but came back
+                    last.cnt += 1
+                    if not top.long:
+                        # <- too short to keep
+                        print(f'too short:')
+                        print(f'\t last.pitch = {last.pitch}')
+                        print(f'\t pitch = {top.pitch}')
+                        print(f'\t [{PITCH_T[i-top.cnt-1]}, {PITCH_T[i]}]')
+                        last.cnt += top.cnt
+                        stack.pop()
+                        del top
+                else:
+                    # <- p is a (possibly) unseen pitch (need to search down stack)
+                    stack.append(PointInfo(p, 1))
+
+    # i = 0
+    # start = 0
+    # for PI in stack:
+    #     print(f'stack[{i}]:')
+    #     print(f'\t pitch = {PI.pitch}')
+    #     print(f'\t [{PITCH_T[start]}, {PITCH_T[start+PI.cnt]}]')
+    #     start += (PI.cnt + 1)
+    #     i+=1
+
+
+    NEW_PITCH = EmptyArr(N)
+    i = 0
+    for PI in stack:
+        NEW_PITCH[i:i+PI.cnt] = PI.pitch
+
+    # print(NEW_PITCH)
+
+    return NEW_PITCH
+
+    # P = PITCH[:]
+    # N = PITCH.size
+    # fs = PITCH.size / PITCH_T[-1]
+    # dS = sec2samp(dT, fs)
+    # p = PITCH[0]
+    # cnt = 0
+    # first_dev = None
+    # candidates = []     # stack
+    # for i in range(N):
+    #     # print(f'PITCH[i] = {PITCH[i]}')
+    #     if PITCH[i] != p:
+    #         if cnt == 0:
+    #             #print(f'\t NEW dev from {p}] @ i = {i}')
+    #             first_dev = i
+    #             cnt += 1
+    #         elif cnt >= dS:
+    #             # this is more than a short deviation
+
+    #             # we don't know if this is the p we want tho (ie: it could be in a short deviation)
+
+    #             p = PITCH[i]
+    #             #print(f'\t more than a short deviation ... NEW p: {p}]')
+    #             cnt = 0
+    #             first_dev = None
+    #         else:
+    #             cnt += 1
+    #     else:
+    #         # it's the pitch we want
+    #         if cnt != 0:
+    #             # get rid of the short deviation
+    #             P[first_dev:i] = p
+    #             cnt = 0
+    #             first_dev = None
+    return P
+
 
 # -----------
+MAX = None
+def Stretch(pitches: np.ndarray, maxPitch: int) -> np.ndarray:
+        '''
+            To counteract any adverse effect of this wide pitch frequency range on the slopes,
+            the F0s are stretched to be on the almost same pitch frequency range: [min_f, max_f]
+        '''
 
-def Stretch(pitches: np.ndarray, maxPitchThreshold: int) -> np.ndarray:
-    # max_i = np.where(np.isinf(pitches),-np.Inf,pitches).argmax()
-    # max = pitches[max_i]
-    # print(f'max = {max}')
-    stretch: float = maxPitchThreshold / pitches.max()
-    print(f'stretch = {stretch}')
-    return pitches * stretch
+    # METHOD 1
 
-def SlopeSum(y: np.ndarray) -> tuple[np.ndarray]:
-    N = y.size
-    FollowingSlope = np.zeros((N,))
-    NumSameSlopeDirection = np.zeros((N,))
+        N = pitches.size
 
+        # CALCULATE MAX (up until i) for each i
+
+        global MAX
+        MAX = np.zeros(N)
+
+        cur_max = pitches[0]
+
+        for i in range(N):
+            MAX[i] = cur_max
+            if pitches[i] > cur_max:
+                cur_max = pitches[i]
+
+        # STRETCH THE PITCH CURVE USING MAX AT EACH POINT
+
+        stretched = copy.deepcopy(pitches)
+
+        for i in range(N):
+            m = MAX[i]
+            if m != 0:
+                stretched[i] = pitches[i] * ( maxPitch / m )
+
+        return stretched
+
+def FollowingSlopes(pitchSlopes: np.ndarray) -> tuple[np.ndarray]:
+    '''
+        INPUT: pitchSlopes <ndarray>
+        OUTPUT: FollowingPitchSlope <ndarray>
+        - at point i -> sum all the slopes ahead of i until no longer the same slope
+    '''
+    N = pitchSlopes.size
+    FollowingPitchSlope = EmptyArr(N)
+    NumSameSlopeDirection = EmptyArr(N)
+    #-----
     for i in range(0, N-1):
-        sum = y[i]
+        sumSlope = pitchSlopes[i]
+        sameSignSlopes = [ sumSlope ]
+        numSame = [ 0 ]
         j = i+1
-        while  ( y[i] > 0 and y[j] > 0 ) or ( y[i] < 0 and y[j] < 0 ):
-            sum += y[j]
+        while j < N and not abs(pitchSlopes[j]) < 1 and ( pitchSlopes[i] * pitchSlopes[j] )  > 0:
+            # <- same signed slope
+            sumSlope += pitchSlopes[j]
+            sameSignSlopes.insert(0, sumSlope)      # add to front
+            numSame.insert(0, j-i)                # add to front
             j+=1
-            if j >= N-1: break
-        FollowingSlope[i] = sum
-        NumSameSlopeDirection[i] = j - i
+        #-------
+        # [i:j] = subarray where all are the same sign
+        FollowingPitchSlope[i:j] = sameSignSlopes
+        NumSameSlopeDirection[i:j] = numSame
+        i += j
+    #-----
+    return [FollowingPitchSlope, NumSameSlopeDirection]
 
-    return [FollowingSlope, NumSameSlopeDirection]
+def GetStatus(SLOPES: np.ndarray, FollowingPitchSlope: np.ndarray, NumSameSlopeDirection: np.ndarray, THRESHOLDS: np.ndarray) -> np.ndarray:
+    N = FollowingPitchSlope.size
+    STATUS = np.zeros((N,))
+    #-------
+    OnsetSeen = False
+    i = 0
+    while i <  N-1:
+        if np.abs(FollowingPitchSlope[i]) > np.abs(THRESHOLDS[i]) and SLOPES[i] > 10:
+            # trajectory change has happened (onset, offset or StartTransition)
+            j = int(NumSameSlopeDirection[i])
 
-def SlopeMean(y: np.ndarray, n=10) -> np.ndarray:
-    N = y.size
-    R = n//2
-    L = n-R
-    MEANS = np.zeros((N,))
-    for i in range(0, N-1):
-        i0 = max(0, i-L)
-        i1 = min(N-1, i+R)
-        MEANS[i] = np.mean(y[i0:i1])
-    return MEANS
+            if not OnsetSeen:
+                # first trajectory change after a silence ==> movement to reach an 𝑂𝑛𝑠𝑒𝑡
+                STATUS[i] = START_TRANSITION
+            else:
+                # the current point is an 𝑂𝑓𝑓𝑠𝑒𝑡
+                STATUS[i] = OFFSET
+                STATUS[i+1] = START_TRANSITION
+                OnsetSeen = False
+            #----
+            STATUS[i+j-1] = END_TRANSITION
+            STATUS[i+j] = ONSET
+            OnsetSeen = True
+            #----
+            i += j+1
+        else:
+            i += 1
 
-def SlopeStdDev(SLOPES: np.ndarray, MEANS: np.ndarray, n=10) -> np.ndarray:
-    N = SLOPES.size
-    R = n//2
-    L = n-R
-    DEV = np.zeros((N,))
-    # ------------------
-    for i in range(0, N-1):
-        i0 = max(0, i-L)
-        i1 = min(N-1, i+R)
-        arr = [ (SLOPES[i] - MEANS[i])**2 for i in range(i0, i1) ]
-        DEV[i] = np.sqrt(np.sum(arr)/(n-1))
-    # ------------------
-    return DEV
 
-def PitchDetectAlg(AS: AudioSignal):
+    return STATUS
 
-    # params (from signal)
+# ------------
+
+def PitchContour(y: np.ndarray, x: np.ndarray, fs, fmin, fmax) -> tuple[np.ndarray]:
+    '''
+        PARAMETERS
+        ----------
+        frame_length :  length of the frames (in samples)
+        win_length :    length of the window for calculating autocorrelation (in samples)
+        hop_length :    number of audio samples between adjacent YIN predictions
+    '''
+    frame_length = 4096
+    window_size = frame_length // 2
+    hop_length = frame_length // 4
+
+    # PITCH = yin(
+    #     y=y,
+    #     fmin=fmin,
+    #     fmax=fmax,
+    #     sr=fs,
+    #     frame_length=frame_length,
+    #     win_length=window_size,
+    #     hop_length=hop_length,
+    # )
+
+    # PITCH_T, PITCH = Pitch_Contour(y=y, fs=fs, window_size=window_size, overlap_size= window_size-hop_length,fmin=70, fmax=900)
+
+    PITCH, voiced_flag, voiced_prob = librosa.pyin(
+        y=y,
+        fmin=fmin,
+        fmax=fmax,
+        sr=fs,
+        frame_length=frame_length,
+        win_length=window_size,
+        hop_length=hop_length
+    )
+
+    # Calculate the Times for each frame
+
+    n_frames = PITCH.size
+    PITCH_T = np.zeros((n_frames))
+    for f_num in range(n_frames):
+        PITCH_T[f_num] = x[hop_length * f_num]
+
+    return [PITCH_T, PITCH]
+
+#-------------
+
+def PitchDetectAlg(AS: AudioSignal, plotIt=False):
+
+    # from signal
         x = AS.time
         y = AS.signal
         fs = AS.sample_freq
 
     # params
 
-        maxPitchThreshold = 1000
-        frame_length = 4096
-        window_size = frame_length // 2
-        overlap_size = frame_length // 4
-        mean_n = 20
-        dev_n = 20
-        t = 2
+        fmin=65
+        fmax=900
+        n = 30
+        t = 2.5
+        min_note_dist = 0.15 # *** can't be too much (breaks for 0.2)
+        silence_threshold = 0.005
 
-    # PLOTTING
+    # 0 - PRE PROCESSING
 
-        FIG = CustomFig()
+        y = savgol_filter(y, 512, 2)
+
+        y = DetectSilence(t=t, signal=y, threshold=silence_threshold)
 
     # 1 - PITCH CONTOUR
 
-        # F0, voiced_flag, voiced_prob = librosa.pyin(y=y, fmin=fmin, fmax=fmax, sr=fs, frame_length=frame_length)
-        # F0_times = librosa.times_like(F0)
-        F0_times, F0 = PitchContour(y=y, fs=fs, window_size=window_size, overlap_size=overlap_size)
-        top_axes = FIG.plot_bottom(x=F0_times, y=F0, label_x='times (s)', label_y='F0 (Estimated)')
+        PITCH_T, PITCH = PitchContour(y, x, fs, fmin=fmin, fmax=fmax)
+
+        PITCH = ToNearestNotes(PITCH)
+
+        N = PITCH.size
 
     # 2 - STRETCH PITCH CONTOUR
 
-        F0_stretched = Stretch(pitches=F0, maxPitchThreshold=maxPitchThreshold)
-        top_axes.plot(F0_times, F0_stretched, color='red')
-        main_axes = FIG.plot_bottom(x=F0_times, y=F0_stretched, label_x='times (s)', label_y='F0 (stretched)')
+        STRETCH_PITCH =  Stretch(pitches=PITCH, maxPitch=fmax)
 
     # 3 - CALCULATE THE SLOPES
 
-        F0_diff: np.ndarray = np.gradient(f=F0)
-        main_axes.plot(F0_times, F0_diff, label='Slopes', color='purple')
+        SLOPES: np.ndarray = np.gradient(PITCH, PITCH_T)
 
     # 4 - SUMMING THE SLOPES: WHEN DOES THE SLOPE CHANGE SIGN?
 
-        FollowingSlope, NumSameSlopeDirection = SlopeSum(F0_diff)
+        FollowingPitchSlope, NumSameSlopeDirection = FollowingSlopes(SLOPES)
 
-    # 5 - SLOPE MEANS
+    # 5 - MEAN and STD-DEV of SLOPES
 
-        MEANS = SlopeMean(F0_diff, n=mean_n)
-        main_axes.plot(F0_times, MEANS, label='Slope Mean', color='orange')
-
-    # 6 - STD DEV OF SLOPES
-
-        DEVS = SlopeStdDev(F0_diff, MEANS, n=dev_n)
-        main_axes.plot(F0_times, DEVS, label='Slope Std Dev',color='green')
+        MEANS, DEVS = Signal_Mean_StdDev(FollowingPitchSlope, n=n)
 
     # 7 - ESTIMATE STATUS FOR EACH POINT
 
-        print(f'# means = {MEANS.size}')
-        print(f'# std dev = {DEVS.size}')
-        print(f'# slopes = {F0_diff.size}')
-
-        NONE = 0
-        START_TRANSITION = 1
-        END_TRANSITION = 2
-        ONSET = 3
-        OFFSET = 4
-
         THRESHOLDS = MEANS + ( DEVS * t )
-        main_axes.plot(F0_times, THRESHOLDS, color='red')
 
-        #-----
-        N = F0_diff.size
-        STATUS = np.zeros((N,))
-        FirstTime = True
-        i = 0
-        while i <  N-1:
+        STATUS = GetStatus(SLOPES, FollowingPitchSlope, NumSameSlopeDirection, THRESHOLDS)
 
-            if F0[i] == 0:
-                FirstTime = True
+        if plotIt:
 
-            if F0_diff[i] > THRESHOLDS[i]:
-                # trajectory change has happened (onset, offset or StartTransition)
-                j = int(NumSameSlopeDirection[i])
+            FIG = CustomFig()
 
-                if FirstTime :
-                    # first trajectory change after a silence ==> movement to reach an 𝑂𝑛𝑠𝑒𝑡
-                    STATUS[i] = START_TRANSITION
-                    FirstTime = False
-                else:
-                    # the current point is an 𝑂𝑓𝑓𝑠𝑒𝑡
-                    STATUS[i] = OFFSET
-                    STATUS[i+1] = START_TRANSITION
-                    FirstTime = True
+            axes = FIG.plot_bottom(x=x, y=y, label_x='Time(s)', label_y='Amplitude')
 
-                STATUS[i+j-1] = END_TRANSITION
-                STATUS[i+j] = ONSET
-                #----
-                i += j+1
-            else:
-                STATUS[i] = NONE
-                i += 1
+            pitch_axes = FIG.plot_bottom(x=PITCH_T, y=PITCH, label_x='Time(s)', label_y='F0')
+            pitch_axes.plot(PITCH_T, STRETCH_PITCH, label='Stretched Pitch', color='orange')
+            # pitch_axes.axhline(y=fmin, color='black')
+            # pitch_axes.axhline(y=fmax, color='black')
 
-        # ------------------
+            for i in range(0,N-1):
+                color = None
+                t = PITCH_T[i]
+                if STATUS[i] == NONE:
+                    continue
+                elif STATUS[i] == ONSET:
+                    color = 'orange'
+                elif STATUS[i] == OFFSET:
+                    color = 'red'
+                elif STATUS[i] == START_TRANSITION:
+                    color = 'green'
+                elif STATUS[i] == END_TRANSITION:
+                    color = 'purple'
 
-        # PLOT EACH STATUS
-        axes = FIG.plot_bottom(x=x, y=y, label_x='Time(s) + Status', label_y='Amplitude')
-        for i in range(0,N-1):
-            color = None
-            if STATUS[i] == NONE:
-                continue
-            elif STATUS[i] == ONSET:
-                color = 'green'
-            elif STATUS[i] == OFFSET:
-                color = 'red'
-            elif STATUS[i] == START_TRANSITION:
-                color = 'orange'
-            axes.axvline(x=F0_times[i], color=color)
+                axes.axvline(x=t, color=color)
 
+            # FIG.CustomLegend(axes, [
+            #     ['orange', 'ONSET'],
+            #     ['red', 'OFFSET'],
+            #     ['green', 'Start Transition'],
+            #     ['purple', 'End Transition']
+            # ])
 
-    # SHOW ALL PLOTS
-        main_axes.legend()
-        FIG.show()
+            main_axes = FIG.plot_bottom(x=PITCH_T, y=STRETCH_PITCH, label_x='times (s)', label_y='F0 (stretched)')
+            main_axes.set_xlim(0, PITCH_T[-1])
+            main_axes.plot(PITCH_T, SLOPES, label='Slopes', color='purple')
+            main_axes.plot(PITCH_T, np.abs(FollowingPitchSlope), label='Following Slope', color='grey')
+            main_axes.plot(PITCH_T, NumSameSlopeDirection, label='Num Same Slope', color='black')
+            main_axes.plot(PITCH_T, MEANS, label='Slope Mean', color='orange')
+            main_axes.plot(PITCH_T, DEVS, label='Slope Std Dev', color='green')
+            main_axes.plot(PITCH_T, THRESHOLDS, label='Threshold', color='red')
+            main_axes.legend()
 
-# ------- custom process
+        # SHOW ALL PLOTS
+
+            FIG.show()
 
 
-def test():
-  AS: AudioSignal = AudioSignal_FromFile('../SampleInput/voiceScale.wav')
-  AS.change_dtype(np.float64)
-  AS.Normalize()
-  PitchDetectAlg(AS)
+    # 8 - RETURN NEEDED INFORMATION
 
-def testACF():
-    AS: AudioSignal = AudioSignal_FromFile('../SampleInput/doh.wav')
-    T = AS.time
-    fs = AS.sample_freq
-    acf = ACF(AS.signal)
-    fig = CustomFig()
-    ax = fig.plot_bottom(x=T, y=acf)
+        return [PITCH_T, PITCH, STATUS]
 
-    min_T = 1 / 900
-    max_T = 1 / 100
+# ------- TESTS -------
+name = 'voiceScale_Filtered'
+AS: AudioSignal = AudioSignal_FromFile(f'../SampleInput/{name}.wav')
+y: np.ndarray = AS.signal
+t = AS.time
+fs = AS.sample_freq
 
-    ax.set_xlim(min_T, max_T)
+def TestMainAlg():
+  PitchDetectAlg(AS, plotIt=True)
 
-    ax.axvline(x=min_T, color='red')
-    ax.axvline(x=max_T, color='red')
+def PitchTest():
+    global y, t, fs
+    # y = savgol_filter(y, 256, 2)
+    # PITCH_T, PITCH = PitchContour(y, t, fs, 65, 900)
+    #PITCH = ToNearestNotes(PITCH)
+    #MEAN, DEVS = Signal_Mean_StdDev(PITCH, n=40)
+    #MEAN_SLOPE = np.gradient(MEAN, PITCH_T)
 
-    s0 = int(min_T * fs)
-    s1 = int(max_T * fs)
+    FIG = CustomFig()
+    axes = FIG.plot_bottom(x=PITCH_T, y=PITCH, label_x='Time(s)', label_y='Pitch')
+    # P2 = RemoveQuickPitchChange(PITCH, PITCH_T, 0.15)
+    # axes.plot(PITCH_T, P2 + 40, color='orange')
+    SP = Stretch(pitches=PITCH, maxPitch=900)
+    axes.plot(PITCH_T, SP + 40, color='red')
 
-    print(f's0 = {s0} => t = {T[s0]}, s1 = {s1} => t = {T[s1]}')
+    axes.plot(PITCH_T, MAX + 500, color='purple')
 
-    sec = acf[s0:s1]
+    FIG.show()
 
-    max_i = s0 + sec.argmax(axis=0)
+def PipTrack():
+    global y, t, fs
 
-    print(f'max_i = {max_i}')
+    pitches, mags = librosa.piptrack(
+        y=y,
+    )
 
-    ax.axvline(x=T[max_i], color='orange')
-
-    fig.show()
-
-def test2():
-    AS: AudioSignal = AudioSignal_FromFile('../SampleInput/doh.wav')
-    y=AS.signal
-    T = AS.time
-    fs = AS.sample_freq
-    fig = CustomFig()
-    ax = fig.plot_bottom(x=T, y=y)
-
-    for i in range(3, 6):
-        ws = 512 * (2 ** i)
-        F0_times, F0 = PitchContour(y=y, fs=fs, window_size=ws, overlap_size=ws/4)
-        ax.plot(F0_times, F0, label=f'ws={ws}')
+    print(pitches.shape)
+    # pyplot.imshow(pitches, aspect="auto", interpolation="nearest", origin="lower")
+    # pyplot.imshow(mags[:100, :], aspect="auto", interpolation="nearest", origin="lower")
+    # pyplot.plot(np.tile(np.arange(pitches.shape[1]), [100, 1]).T, pitches[:100, :].T, '.')
+    pyplot.imshow(mags, cmap='magma')
+    pyplot.title( "Pitches" )
+    pyplot.xlabel('Time (s)')
+    pyplot.ylabel('Frequency Bins')
+    pyplot.colorbar()
+    pyplot.show()
 
 
-    ax.legend()
-    fig.show()
 
-test2()
+TestMainAlg()

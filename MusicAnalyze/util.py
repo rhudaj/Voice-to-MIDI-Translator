@@ -1,6 +1,80 @@
+# -------------------- IMPORTS --------------------
+# ----- EXTERNAL
 import math
 import numpy as np
+from numpy import ndarray
 import librosa
+from scipy import signal as sg
+# ----- INTERNAL
+from AudioUtil.DataStructures.plot import CustomFig
+from scipy.signal import hilbert
+# -------------------- Creating / Modifying (Audio Only) Signals --------------------
+
+def TimeArray(duration: float, fs: float = 44100) -> ndarray:
+  # Note, we take the floor for # steps (so our time will always be less)
+  num_steps = int(np.floor(duration * fs))
+  return np.linspace(start=0, stop=duration, num=num_steps, endpoint=False)
+
+def create_pure_tone(freq: float, duration: float, peak:int, fs: float = 44100, phase_shift=0)->tuple[np.ndarray]:
+  # pure tone = single sine wave, at a fixed magnitude (peak) & frequency (freq)
+  T = TimeArray(duration, fs)
+  signal = np.sin((2*np.pi * freq * T) + phase_shift) * peak
+  return [T, signal]
+
+def cos_pure_tone(freq, duration:float, peak:int, fs:float=44100, phase_shift=0)->tuple[np.ndarray]:
+  T = TimeArray(duration, fs)
+  signal = np.cos(2*np.pi * freq * T + phase_shift) * peak
+  return
+
+def create_triangle_wave(freq, duration, peak, fs):
+  T = TimeArray(duration, fs)
+  return sg.sawtooth(2*np.pi*freq*T, width=0.5) * peak
+
+def create_square_wave(freq, duration, peak, fs):
+  T = TimeArray(duration, fs)
+  return sg.square(2*np.pi*freq*T) * peak
+
+def combine_signals(*sigs: np.ndarray, fs) -> tuple[np.ndarray]:
+  # Add all the signals together
+  signals = []
+  N = 0
+  for sig in sigs:
+    n = sig.size
+    if n > N:
+      N = n
+    else:
+      extra = N - n + 1
+      np.pad(sig, (0, extra))
+
+    signals.append(sig)
+
+  combined_signal = sum(signals)
+
+  T = np.arange(start=0, stop=N-1, step=N/fs)
+
+  return [T, combined_signal]
+
+def Amplify(signal, dBs: int):
+  # amplify a signal by a specified number of dBs
+  amount = DecibelToLinear(dBs)
+  factor = 1
+  if dBs < 0: factor = -1
+  return signal * (1+amount*factor)
+
+def tones2signal(freqs: list[float], phases: list[float], amps: list[float], duration: float, fs):
+  signals = []
+  i = 0
+  for F in freqs:
+    tone = create_pure_tone(freq=F, duration=duration, peak=amps[i], fs=fs, phase_shift=phases[i])
+    signals.append(tone)
+    i+=1
+  sum = combine_signals(*signals)
+  return sum
+
+# -------------------- HELPER FUNCTIONS --------------------
+
+def EmptyArr(N: int) -> np.ndarray:
+  return np.zeros((N,))
 
 def LinearToDecibel(value: float) -> float :
   return 20.0 * math.log10(value)
@@ -14,23 +88,12 @@ def sec2samp(s: float, fs: float) -> int:
 def Normalize(y: np.ndarray):
   return y / y.max()
 
-def SignalEnvelope(x: np.ndarray, y: np.ndarray, win_len_samps: int) -> np.ndarray:
-  # setup params
-    y = np.abs(y)
-  # get the moving average of the signal
-    n = win_len_samps
-    y = np.cumsum(y, dtype=float)
-    y[n:] = y[n:] - y[:-n]
-    y = y / n
-    return y
 
-def GetPeakIndices(
-  y: np.ndarray,
-  max_range: int,
-  avg_range: int,
-  delta: float = 0,
-  wait: float = 0
-):
+def Envelope(y: np.ndarray, w = 4096) -> np.ndarray:
+  analytic_signal = hilbert(y)
+  return np.abs(analytic_signal)
+
+def GetPeakIndices(y: np.ndarray, max_range: int, avg_range: int, delta: float = 0, wait: float = 0):
   max_range //= 2
   avg_range //= 2
   peak_indices = librosa.util.peak_pick(
@@ -42,26 +105,53 @@ def GetPeakIndices(
     delta=delta,
     wait=wait
   )
-
   return peak_indices
+
+def RemoveDC(y: np.ndarray):
+  '''
+    essentially, make mean = 0
+  '''
+  y = y - np.mean(y)
+
+def mu_law(x, mu=255):
+  # map each input value to a value
+  return np.sign(x) * np.log(1+mu*np.abs(x)) / np.log(1+mu)
+
 
 # -------------------- STD MATH FUNCTIONS --------------------
 
 def Variance(values: np.ndarray, avg: float, sample: bool = False) -> float:
-	var = 0
-	N = values.size
-	for val in values:
-		var += 2 ** (val - avg) #*** avg over all values
-	if sample:
-		var /= (N -1)
-	else:
-		var /= N
-	return var
+  N = values.size
+  #-------------
+  var = 0
+  for val in values:
+    var += (val - avg) ** 2 #*** avg over all values
+  if sample:
+    var /= (N -1)
+  else:
+    var /= N
+  return var
 
 def StdDeviation(values: np.ndarray, avg: float, sample: bool = False) -> float:
-  var = Variance(values, avg, sample)
-  sd = math.sqrt(var)
-  return sd
+  return math.sqrt(Variance(values, avg, sample))
+
+def Signal_Mean_StdDev(y: np.ndarray, n=10) -> tuple[np.ndarray]:
+    N = y.size
+    noBefore = n // 2
+    noAfter = n - noBefore
+    #------
+    MEANS = EmptyArr(N)
+    DEVS = EmptyArr(N)
+    #------
+    for i in range(N):
+        s0 = max(0, i - noBefore)
+        s1 = min(N-1, i + noAfter + 1)
+        values: np.ndarray = y[s0 : s1]
+        MEANS[i] = np.mean(values)
+        DEVS[i] = StdDeviation(values, MEANS[i], True)
+    #------
+    return [MEANS, DEVS]
+
 
 # -------------------- PITCH CONTOUR --------------------
 
@@ -88,14 +178,7 @@ def ACFmax_index(acf: np.ndarray, s0, s1):
   sec = acf[s0:s1]
   return sec.argmax(axis=0)
 
-def PitchContour(
-    y: np.ndarray,
-    fs: int,
-    window_size: int,
-    overlap_size: int,
-    fmax = 900,
-    fmin = 70
-  ) -> tuple[np.ndarray]:
+def Pitch_Contour(y: np.ndarray, fs: int, window_size: int, overlap_size: int, fmax = 900, fmin = 70) -> tuple[np.ndarray]:
   #-------
   stepSize = int(window_size - overlap_size)
   N = int( ((y.size - window_size) // stepSize) + 1)
@@ -110,6 +193,7 @@ def PitchContour(
   #-------
   t0 = 0
   for i in range(0, N):
+    # Get the window
     t0 = i * stepSize  # index to start
     t1 = t0 + window_size
     window = y[t0:t1]
@@ -125,3 +209,6 @@ def PitchContour(
     t0+=stepSize
   #--------
   return [TIMES, F0]
+
+
+# -------------------- COMPRESSION --------------------

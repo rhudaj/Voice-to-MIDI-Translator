@@ -1,245 +1,205 @@
 import numpy as np
+import librosa
+from matplotlib.axes import Axes
 from AudioUtil.DataStructures.AudioSignal import AudioSignal, AudioSignal_FromFile
-from AudioUtil.MusicAnalyze.util import PitchContour, StdDeviation
-#----------------------------------------
+from AudioUtil.DataStructures.plot import CustomFig
+from AudioUtil.MusicAnalyze.util import SignalEnvelope
 
-class OnsetSettings:
-    PitchThreshold: float = 2
-    MaxPitchThreshold: float = 4
-    NumberOfF0sBefore: int = 10
-    NumberOfF0sAfter: int = 10
-    MinNumberOfFrequenciesBetweenOnsets: int = 10
-    timeDistanceBetweenFrames = 0.1
+# ------
 
-#----------------------------------------
+plot = True
+FIG: CustomFig
+main_axes: Axes
+if plot:
+  FIG = CustomFig()
 
-class PitchInfo:
-    Onset: bool
-    Offset: bool
-    Silent: bool
-    TransitionNote: bool
+# ------ USING LIBROSA FUNCTIONS
 
-#----------------------------------------
+def LogPowerMelSpectrogram(AS: AudioSignal, n_fft, win_length, hop_length, n_mels) -> tuple[np.ndarray, np.ndarray]:
+  y = AS.signal
+  sr = AS.sample_freq
 
-SILENT = 0
-START_TRANSITION = 1
-END_TRANSITION = 2
-ONSET = 3
-OFFSET = 4
+  # Get Mel Spectogram
+  mel_spect = librosa.feature.melspectrogram(
+    y=y,
+    sr=sr,
+    n_fft=n_fft,
+    hop_length=hop_length,
+    win_length=win_length,
+    n_mels=n_mels,
+    # additional args for mel filter bank parameters:
+    fmin=100,
+    fmax=8000
+  )
+  log_power_mel_spect = librosa.power_to_db(S=mel_spect, ref=np.max)    # Convert to Log-Power (dB)
 
+  # Array of time values to match the time axis from a feature matrix
+  times = librosa.times_like(
+    X=mel_spect,
+    sr=sr,
+    n_fft=n_fft,
+    hop_length=hop_length
+  )
 
-#----------------------------------------
+  return [log_power_mel_spect, times]
 
-class OnsetDetector:
-    #----------------------------------------
-    settings: OnsetSettings
-    pitches: np.ndarray
-    pitchTimes: np.ndarray
-    #----------------------------------------
+def OnsetEnvelope(AS: AudioSignal) -> tuple[np.ndarray, int]:
 
-    def __init__(self, AS: AudioSignal):
-        y = AS.signal
-        fs = AS.sample_freq
-        # params
-        frame_length = 4096
-        window_size = frame_length // 2
-        overlap_size = frame_length // 8
-        # setup
-        self.pitchTimes, self.pitches = PitchContour(y=y, fs=fs, window_size=window_size, overlap_size=overlap_size)
-        self.settings = OnsetSettings()
+  # 1 - Remove frequencies we don't care about. We don't want these contributing to the energy of the STFT
+  y = AS.signal
+  sr = AS.sample_freq
 
-    #----------------------------------------
+  # 1 -- Mel Power Spectrogram
 
-    def EmptyArr(self, N: int) -> np.ndarray:
-        return np.zeros((N,))
+  n_fft = 2048                    # in speech processing, the recommended value is 512, corresponding to 23 milliseconds at a sample rate of 22050 Hz
+  win_length = n_fft              # default
+  hop_length = win_length // 4    # default
+  n_mels = 128
 
-    # ----------------------------- HELPER FUNCTIONS (FOR ALGORITHM) -----------------------------
+  mel_spect, times = LogPowerMelSpectrogram(AS, n_fft, win_length, hop_length, n_mels)
 
-    def GetPitches(self, AS: AudioSignal) -> tuple[np.ndarray]:
-        frame_length = 4096
-        window_size = frame_length // 2
-        overlap_size = frame_length // 8
-        #-----------
-        x = AS.time
-        y = AS.signal
-        fs = AS.sample_freq
-        #-----------
-        self.pitchTimes, self.pitches = PitchContour(y=y, fs=fs, window_size=window_size, overlap_size=overlap_size)
-        return [self.pitchTimes, self.pitches]
+  # 2 --  spectral flux onset strength envelope
 
-    def StretchingPitch(self, pitches: np.ndarray , maxPitchThreshold) -> np.ndarray:
-        stretch: float = maxPitchThreshold / pitches.max(axis=0)
-        return pitches * stretch
+  onset_env = librosa.onset.onset_strength(sr=sr, S=mel_spect)
+  onset_env /= onset_env.max()    # Normalize it
 
-    def GetSlopes(self, stretchedPitches: np.ndarray) -> np.ndarray:
-        '''
-            INPUT:
-                - stretchedPitches <ndarray>
-                - pitchTimes <ndarray>
-                - timeDistanceBetweenFrames <float>
-            OUTPUT: pitchSlopes <ndarray>
-        '''
-        N = stretchedPitches.size
-        pitchSlopes = self.EmptyArr(N)
-        #----------
-        for i in range(1, N-1):
-            timeDiff: float = self.pitchTimes[i] - self.pitchTimes[i - 1]
-            if timeDiff <= 0: timeDiff = self.settings.timeDistanceBetweenFrames
-            diff: float = stretchedPitches[i] - stretchedPitches[i - 1]
-            pitchSlopes[i] = diff / timeDiff
-        #----------
-        return pitchSlopes
+  # 3 -- PLOT
+  if plot:
+    # librosa.display.specshow(mel_spect, sr=sr, win_length=win_length, hop_length=hop_length, y_axis='log', x_axis='time', ax=main_axes)
+    main_axes.plot(times, onset_env, label='Onset Envelope')
 
+  return [onset_env, hop_length]
 
-    def FollowingSlopes(self, pitchSlopes: np.ndarray) -> np.ndarray:
-        '''
-            INPUT: pitchSlopes <ndarray>
-            OUTPUT: FollowingPitchSlope <ndarray>
-        '''
-        N = pitchSlopes.size
-        FollowingPitchSlope = self.EmptyArr(N)
-        #-----
-        for i in range(0, N-1):
-            sumSlope = pitchSlopes[i]
-            #-------
-            for j in range(i+1, N-1):
-                if ( pitchSlopes[i] * pitchSlopes[j] )  > 0 :   # same sign?
-                    sumSlope += pitchSlopes[j]
-                else:
-                    break
-            #-------
-            FollowingPitchSlope[i] = sumSlope
-        #-----
-        return FollowingPitchSlope
+# -------- CUSTOM PROCESS - NOVELTY ENVELOPE
 
-    def AvgStdFollowingPitchSlopesInPercent(self, FollowingPitchSlope: np.ndarray, noBefore: int, noAfter: int=0) -> tuple[np.ndarray]:
-        N = FollowingPitchSlope.size
-        AvgFollowingPitchSlope = self.EmptyArr(N)
-        StdFollowingPitchSlope = self.EmptyArr(N)
-        #------
-        for i in range(noBefore, N-noAfter - 1):
-            localPitches: np.ndarray = FollowingPitchSlope[i - noBefore :  i + noAfter + 1]   # *** + 1 ??
-            avg: float =  np.mean(localPitches)
-            std: float = StdDeviation(localPitches, avg, True)
-            AvgFollowingPitchSlope[i] = avg
-            StdFollowingPitchSlope[i] = std
-        #------
-        return [AvgFollowingPitchSlope, StdFollowingPitchSlope]
+def BasicSpectralNovelty(Y) -> np.ndarray:
+  # no parameters to play with
+  Y_diff = np.diff(Y, n=1)  # Y(n+1,k) - Y(n,k)
+  Y_diff[Y_diff < 0] = 0
+  nov = np.sum(Y_diff, axis=0)                # sum over all frequencies
+  nov = np.concatenate((nov, np.array([0])))  # 1 axis
+  return nov
 
-    # ----------------------------- HELPERS V2 -----------------------------
+def LocalAverage(Y, M: float) -> np.ndarray:
+  '''
+  Compute local average of signal
+  Args:
+      x (np.ndarray): Signal
+      M (int): Determines size (2M+1) in samples of centric window  used for local average
+  Returns:
+      local_average (np.ndarray): Local average signal
+  '''
+  L = len(Y)
+  local_average = np.zeros(L)
+  for m in range(L):
+    a = max(m - M, 0)
+    b = min(m + M + 1, L)
+    local_average[m] = (1 / (2 * M + 1)) * np.sum(Y[a:b])
+  return local_average
 
-    def FillOnsetPercentages(self, Status: np.ndarray, StdFollowingPitchSlope: np.ndarray, AvgFollowingPitchSlope: np.ndarray, FollowingPitchSlope: np.ndarray) -> tuple[np.ndarray]:
-        N = Status.size
-        PercentOnsetBasedPitch = self.EmptyArr(N)
-        PercentOffsetBasedPitch = self.EmptyArr(N)
-        for i in range(0, N-2):         # N-2 ***
-            S1 = (Status[i] == SILENT)
-            S2 = (Status[i + 1] == SILENT)
-            if not S1 and S2 :
-                PercentOnsetBasedPitch[i + 1] = 100
-                PercentOffsetBasedPitch[i + 1] = 0
-                PercentOnsetBasedPitch[i] = 0
-                PercentOffsetBasedPitch[i] = 100
-                i+=1
-            elif S1 and not S2 :
-                PercentOnsetBasedPitch[i] = 0
-                PercentOffsetBasedPitch[i] = 100
-                PercentOnsetBasedPitch[i + 1] = 100
-                PercentOffsetBasedPitch[i + 1] = 0
-                i+=1
-            elif S1 and S2 :
-                PercentOnsetBasedPitch[i + 1] = 0
-                PercentOffsetBasedPitch[i + 1] = 0
-            else :
-                if (    i >= 1 and
-                        (   StdFollowingPitchSlope[i - 1] > 0.0000001 or
-                            StdFollowingPitchSlope[i - 1] < -0.0000001 ) and
-                        (   np.abs(FollowingPitchSlope[i]) >
-                            np.abs(AvgFollowingPitchSlope[i - 1] + (StdFollowingPitchSlope[i - 1] * self.settings.PitchThreshold)) )
-                ):
-                    PercentOnsetBasedPitch[i] = 100
-        #--------
-        return [PercentOnsetBasedPitch, PercentOffsetBasedPitch]
+def NoveltySpectrum(AS: AudioSignal, n_fft, win_length, hop_length, fmin = 70, fmax = 8000) -> tuple[np.ndarray]:
 
-    def AlteringDetectedOnsets(self, Status: np.ndarray, FollowingPitchSlope: np.ndarray, StdFollowingPitchSlope: np.ndarray, AvgFollowingPitchSlope: np.ndarray):
-        N = Status.size
-        maxDiff: float
-        indexMaxDiff: int
-        tempDiff: float
-        #----------1
-        for i in range(0, N-1):
-            if (Status[i] == ONSET and i >= 1):
-                maxDiff = np.abs(FollowingPitchSlope[i]) - np.abs((AvgFollowingPitchSlope[i - 1] + (StdFollowingPitchSlope[i - 1] * self.settings.PitchThreshold)))
-                indexMaxDiff = i
-                #----------
-                j = i + 1
-                while(j <= i + self.settings.MinNumberOfFrequenciesBetweenOnsets and j < N):
-                    if (Status[j] == SILENT): break
-                    if (Status[j] == ONSET):
-                        tempDiff = np.abs(FollowingPitchSlope[j]) - np.abs((AvgFollowingPitchSlope[j - 1] + (StdFollowingPitchSlope[j - 1] * self.settings.PitchThreshold)))
-                        if (tempDiff > maxDiff):
-                            # Status[indexMaxDiff].Onset = false;
-                            # Status[indexMaxDiff - 1].Offset = false;
-                            maxDiff = tempDiff
-                            indexMaxDiff = j
-                        else:
-                            # Status[j].Oset = false;
-                            if (Status[j - 1].Offset == True):
-                                # Status[j - 1].Offset = False
-                                pass
-                    j+=1
-                #----------
-                i = j - 1
-                if (i >= N): break
-                i += self.settings.MinNumberOfFrequenciesBetweenOnsets - 1
+  y = AS.signal
+  sr = AS.sample_freq
 
-    def AddingTransitions(self, Status: np.ndarray, FollowingPitchSlope: np.ndarray):
-        N = Status.size
-        for i in range(0, N-1):
-            j = i+1
-            if(Status[i] == ONSET and Status[i] in (START_TRANSITION, END_TRANSITION)):
-                positive1: bool = FollowingPitchSlope[i] > 0
-                while j < N:
-                    positive2: bool = FollowingPitchSlope[j] > 0
-                    if ((positive1 != positive2 or (np.abs(FollowingPitchSlope[j])<0.2)) and j-i>1):
-                        Status[j] = ONSET
-                        Status[j - 1] = OFFSET
-                        # Status[i].TransitionNote = True
-                        # pitches[j - 1].TransitionNote = True
-                        break
-                    j+=1
-            #--------
-            i = j
+  # STEP 1 -- STFT
 
-    # ----------------------------- MAIN ALGORITHM -----------------------------
+  STFT = librosa.stft(    # complex x frequency x time
+    y = y,
+    n_fft = n_fft,
+    hop_length=hop_length,
+    win_length=win_length
+  )
 
-    def CalculateOnset(self):
-        pitches = self.pitches
-        stretchedPitches: np.ndarray = self.StretchingPitch(pitches, self.settings.MaxPitchThreshold)
-        pitchSlopes = self.GetSlopes(stretchedPitches)
-        FollowingPitchSlope = self.FollowingSlopes(pitchSlopes)
-        AvgFollowingPitchSlope, StdFollowingPitchSlope = self.AvgStdFollowingPitchSlopesInPercent(pitches, self.settings.NumberOfF0sBefore, self.settings.NumberOfF0sAfter)
-        # ----------
-        N = pitches.size
+  TIMES = librosa.times_like(   # get the time portion of the matrix as an array
+    X=STFT,
+    sr=sr,
+    hop_length=hop_length,
+    n_fft=n_fft
+  )
 
-        Status = self.EmptyArr(N)
-        PercentOnsetBasedPitch, PercentOffsetBasedPitch = self.FillOnsetPercentages(Status, StdFollowingPitchSlope, AvgFollowingPitchSlope, FollowingPitchSlope)
+  # STEP 2 -- FREQUENCY RESTRICT
+  N_BINS = int(1 + (n_fft / 2))
+  STFT_FREQS = np.arange(0, N_BINS) * sr / n_fft      # bin number -> freq
+  i0 = np.where(STFT_FREQS >= fmin)[0][0] - 1
+  i1 = np.where(STFT_FREQS >= fmax)[0][0]
+  STFT[0:i0] = 0
+  STFT[i1:N_BINS-1] = 0
 
-        for i in range(0, N-1):
-            if (PercentOnsetBasedPitch[i] >= 100):
-                Status[i] = ONSET
-                if (i >= 1): Status[i - 1] = OFFSET
-                i += int(self.settings.MinNumberOfFrequenciesBetweenOnsets)
+  # STEP 3 -- Spectral Novelty Function + Compression
 
-        self.AlteringDetectedOnsets(Status, FollowingPitchSlope, StdFollowingPitchSlope, AvgFollowingPitchSlope)
-        self.AddingTransitions(Status, FollowingPitchSlope)
+  MAGS = np.abs(STFT)
+  gamma = 100                             # how much to compress?
+  Y = np.log(1 + gamma * np.abs(MAGS))
+  nov = BasicSpectralNovelty(Y)           # spectral-based novelty function:
+
+  # STEP 3 - SUBTRACTING LOCAL AVERAGE
+
+  M_sec = 0.1
+  Fs_nov = sr / hop_length
+  M_samps = int(np.ceil(M_sec * Fs_nov))
+  nov = nov - LocalAverage(Y=nov, M=M_samps)
+  nov[nov < 0] = 0
+
+  # STEP 4 - NORMALIZE
+  nov /= nov.max()
+
+  # -------- RETURN
+
+  return [TIMES, nov]
+
+# ------ GET  ONSETS
+
+def get_onset_indices(AS: AudioSignal):
+
+  y = AS.signal
+  t = AS.time
+
+  n_fft = 4096
+  win_length = n_fft
+  hop_length = win_length // 1
+
+  # 1 - Get the Novelty Spectrum & it's Envelope
+  TIMES, nov = NoveltySpectrum(AS, n_fft, win_length, hop_length)
+  nov_env = SignalEnvelope(nov)
+  # nov_env, hop_length = OnsetEnvelope(AS)
+
+  global plot
+  if plot:
+    global main_axes
+    main_axes = FIG.plot_bottom(x=t, y=y, label_x='Time(s)', label_y='Amplitude')
+    main_axes.plot(TIMES, nov, label='Novelty Funtion')
+    main_axes.plot(TIMES, nov_env, label='Novelty Envelope')
+    main_axes.legend()
+
+  # 2 - Detect Onsets from the Envelope
+
+  onset_samples = librosa.onset.onset_detect(
+    onset_envelope = nov_env,
+    units='samples',              # return indicies
+    backtrack=True,               # If True, detected onset events are backtracked to the nearest preceding minimum of energy.
+    normalize=True,               # (default) already normalized
+    hop_length=hop_length,
+    # optional params for peak picking algorithm
+    pre_max=1,
+    post_max=1,
+    pre_avg=4,
+    post_avg=4,
+    wait=5
+  )
+
+  if plot:
+    FIG.addVLines(main_axes, [AS.time[s] for s in onset_samples])
+    FIG.show()
+    main_axes.legend()
+
+  return onset_samples
 
 
-def test():
-  AS: AudioSignal = AudioSignal_FromFile('../SampleInput/voiceScale.wav')
-  AS.change_dtype(np.float64)
-  AS.Normalize()
-  OD = OnsetDetector(AS)
-  OD.CalculateOnset()
 
-test()
+def test1():
+    AS: AudioSignal = AudioSignal_FromFile('../SampleInput/voiceScale.wav')
+    AS.change_dtype(np.float64)
+    get_onset_indices(AS)
+
+test1()

@@ -1,8 +1,9 @@
+import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 from matplotlib.axes._axes import Axes
 from matplotlib import gridspec
-from AudioUtil.DataStructures.AudioSignal import AudioSignal
-import numpy as np
+from AudioUtil.DataStructures.note_list import NOTE_FREQS
 
 id = 0
 
@@ -52,10 +53,44 @@ class CustomFig:
     return new_ax
 
   def show(self) -> None:
-      plt.show()
+    plt.show()
 
   def addPoint(self, x: float, y: float):
     plt.plot(x, y, 'ro')  # 'o' can be used to only draw a marker. 'r' = red
 
-  def addLine(self, x: float):
-    plt.axvline(x, color="red")
+  def addVLines(self, axes: Axes, x_positions: list, color='red'):
+    '''
+      Adds each sample in <x: list> as a vertical line to <axes: Axes>
+        - x values need to be in the same unit as what's on the x-axis
+    '''
+
+    for x in x_positions:
+      axes.axvline(x=x, color=color)
+
+
+  def save(self, fileName: str):
+    self.fig.savefig('../PlotOutput/' + fileName + '.png')
+
+  def CustomLegend(self, axes: Axes, entries: list[tuple[str]]):
+    '''
+      entries: list of tuples [color: str, label: str]
+    '''
+    patches = [ mpatches.Patch(color=entry[0], label=entry[1]) for entry in entries]
+    axes.legend(handles=patches)
+
+  def DisplayNotes(self, ax: Axes, FREQS: np.ndarray):
+    F_MIN = FREQS.min()
+    F_MAX = FREQS.max()
+
+    N = len(NOTE_FREQS)
+
+    i = 0
+    while (i < N and NOTE_FREQS[i][1] < F_MIN): i += 1
+
+    j = N - 1
+
+    while(j >= 0 and NOTE_FREQS[i][1] > F_MAX): j -= 1
+
+    for NF in NOTE_FREQS[i:j]:
+      ax.axhline(y=NF[1], color='black')
+      ax.text(x=0,y=NF[1],s=NF[0], fontsize=5)

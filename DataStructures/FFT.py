@@ -5,12 +5,6 @@ from scipy.signal import find_peaks
 from librosa.util import peak_pick
 #---------------------------------------------
 
-class WaveInfo:
-  def __init__(self, F: float, AMP: float, PHASE: float) -> None:
-    self.F = F
-    self.AMP = AMP
-    self.PHASE = PHASE
-
 class FFT:
   N: int
   FSTEP: float
@@ -46,7 +40,7 @@ class FFT:
     self.MAX_F = max
     self.N = self.F.size
 
-  def PeakFreqIndices(self, display=False, heightFactor:float=0.03) -> list[float]:
+  def PeakFreqIndices(self, heightFactor:float=0.03) -> list[float]:
     # Initialize Parameters
       Hz_dist = 10 # in Hz
       sample_dist = Hz_dist / (self.MAX_F-self.MIN_F) * self.N     # Convert distance in Hz to distance in samples
@@ -63,16 +57,7 @@ class FFT:
         wait=sample_dist
       )
 
-    # Display/Plot the results
-      if(display):
-        print(f'PEAK FREQUENCIES: {len(peak_indices)}:')
-        print(f"\t{'Freq (Hz)':<15}MAG")
-        for i in peak_indices:
-          F = self.F[i]
-          MAG = self.MAGS[i]
-          print(f'\t{F:<15}{MAG}')
-
-        return peak_indices
+      return peak_indices
 
   def InverseFFT(self):
     return np.fft.ifft(self.initial)

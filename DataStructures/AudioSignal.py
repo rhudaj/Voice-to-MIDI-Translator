@@ -1,8 +1,7 @@
 import numpy as np
-from scipy.io.wavfile import write
-import scipy.io.wavfile as wavfile
+from scipy.io.wavfile import write, read
 from AudioUtil.MusicAnalyze.util import DecibelToLinear, sec2samp
-
+import librosa
 
 class AudioSignal:
   def __init__(
@@ -22,12 +21,18 @@ class AudioSignal:
     self.signal = signal
     self.dtype = signal.dtype
 
+    self.change_dtype(np.float64)
+    self.Normalize()
+
   def output_wav(self, name: str):
     write(filename=f'{name}.wav', rate=self.sample_freq, data=self.signal)
 
   def Normalize(self):
-    # clip signal (y values) to [-1, 1]
-    self.signal = np.clip(self.signal, -1, 1)
+    abs_val = np.abs(self.signal)
+    max = abs_val.max()
+    min = abs_val.min()
+    print(f'Normalizing \n\t max = {max} @ t = {self.time[self.signal.argmax()]}')
+    self.signal = (self.signal - min) / (max - min)
 
   def get_derivative(self):
     dx = 1 / self.sample_freq
@@ -90,22 +95,10 @@ class AudioSignal:
     factor = DecibelToLinear(gainDB)
     fft[i_start:i_end] += factor
 
-  def SignalEnvelope(self) -> np.ndarray:
-    # setup params
-      win_length_s=0.5
-      fs=self.sample_freq
-      y = np.abs(self.signal)
-    # get the moving average of the signal
-      n = sec2samp(win_length_s, fs)  # window length in samples
-      y = np.cumsum(y, dtype=float)
-      y[n:] = y[n:] - y[:-n]
-      y = y / n
-      return y
-
 #-------------
 
-def AudioSignal_FromFile(path: str) -> AudioSignal:
-    out = wavfile.read(path)
+def AudioSignal_FromFile(path: str, dtype=np.float64) -> AudioSignal:
+    out = read(path)
     sample_freq: int = out[0]
     data: np.ndarray = out[1]
   # Parameters
@@ -117,5 +110,8 @@ def AudioSignal_FromFile(path: str) -> AudioSignal:
     signal = np.frombuffer(buffer=data, dtype=data.dtype)     # returns all data from ALL channels as a 1-dimensional array. total in array = n_samples * n_channels
   # a numpy object from duration. This will be plotted on the x-axis.
     time = np.linspace(0, duration, num=n_samples)
+  # change dtype
+    AS = AudioSignal(n_channels, sample_freq, n_samples, time, signal)
+    AS.change_dtype(dtype)
   # Return
-    return AudioSignal(n_channels, sample_freq, n_samples, time, signal)
+    return AS
