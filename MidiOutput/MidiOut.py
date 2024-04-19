@@ -5,13 +5,9 @@ import os
 # external
 import numpy as np
 import midiutil
-import matplotlib.pyplot as plt
-from matplotlib import colors
-# librosa imports
 import librosa # note_to_hz, note_to_midi, pyin, pitch_tuning, hz_to_midi, times_like, midi_to_note, sequence.viterbi, beat.tempo
 
 DEBUG = False
-PLOT = False
 
 if DEBUG:   sys.stdout = sys.__stdout__
 else:
@@ -241,33 +237,33 @@ def prior_probabilities(audio_signal: np.ndarray, srate: int) -> np.ndarray:
                 else:                       result = Pnot(S.pitch_acc)
                 PRIORS[s2, i] = result
 
-    if PLOT:
-        ax = plt.subplot()
-        ax: plt.Axes = ax
-        T = librosa.times_like(PITCH)
-        ax.plot(T, VOICED_FLAG, color='blue')
-        ax.plot(T, VOICED_PROB, color='red')
-        ax.plot(T, PITCH_MIDI, color='purple')
-        for i in ONSETS: ax.axvline(x=T[i], color='black')
-        plt.show()
+    # if PLOT:
+    #     ax = plt.subplot()
+    #     ax: plt.Axes = ax
+    #     T = librosa.times_like(PITCH)
+    #     ax.plot(T, VOICED_FLAG, color='blue')
+    #     ax.plot(T, VOICED_PROB, color='red')
+    #     ax.plot(T, PITCH_MIDI, color='purple')
+    #     for i in ONSETS: ax.axvline(x=T[i], color='black')
+    #     plt.show()
 
-        ax = plt.subplot()
-        ax: plt.Axes = ax
-        cmap = colors.ListedColormap(['white', 'red', 'orange', 'yellow', 'green', 'blue', 'indigo', 'violet', 'pink', 'black'])
-        bounds= [0, S.voiced_acc, 1 - S.voiced_acc, S.onset_acc, 1 - S.onset_acc, S.pitch_acc, 1 - S.pitch_acc, S.pitch_acc * S.spread, 1]
-        bounds.sort()
-        norm = colors.BoundaryNorm(bounds, cmap.N)
+    #     ax = plt.subplot()
+    #     ax: plt.Axes = ax
+    #     cmap = colors.ListedColormap(['white', 'red', 'orange', 'yellow', 'green', 'blue', 'indigo', 'violet', 'pink', 'black'])
+    #     bounds= [0, S.voiced_acc, 1 - S.voiced_acc, S.onset_acc, 1 - S.onset_acc, S.pitch_acc, 1 - S.pitch_acc, S.pitch_acc * S.spread, 1]
+    #     bounds.sort()
+    #     norm = colors.BoundaryNorm(bounds, cmap.N)
 
-        img = ax.imshow(PRIORS, interpolation='nearest', origin='lower', cmap=cmap, norm=norm, aspect='auto')   # tell imshow about color map so that only set colors are used
-        plt.colorbar(img, cmap=cmap, norm=norm, boundaries=bounds, ticks=bounds)         # make a color bar
+    #     img = ax.imshow(PRIORS, interpolation='nearest', origin='lower', cmap=cmap, norm=norm, aspect='auto')   # tell imshow about color map so that only set colors are used
+    #     plt.colorbar(img, cmap=cmap, norm=norm, boundaries=bounds, ticks=bounds)         # make a color bar
 
-        # where ticks will be displayed
-        ax.set_yticks(np.arange(.5, S.n_states + .5, 2))
-        ax.set_yticklabels(np.arange(1, S.n_notes+2, 1))
-        ax.grid(axis='y', color='black', linestyle='-', linewidth=0.5)
-        ax.set_xlabel('Frame #')
-        ax.set_ylabel('States')
-        plt.show()
+    #     # where ticks will be displayed
+    #     ax.set_yticks(np.arange(.5, S.n_states + .5, 2))
+    #     ax.set_yticklabels(np.arange(1, S.n_notes+2, 1))
+    #     ax.grid(axis='y', color='black', linestyle='-', linewidth=0.5)
+    #     ax.set_xlabel('Frame #')
+    #     ax.set_ylabel('States')
+    #     plt.show()
 
     return PRIORS
 

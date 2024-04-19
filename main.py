@@ -1,9 +1,11 @@
+#python imports
+import sys
+#external imports
 from midiutil import MIDIFile
 import numpy as np
+#internal imports
 from AudioUtil.MidiOutput.MidiOut import signal_to_midi
 from AudioUtil.DataStructures.AudioSignal import AudioSignal, AudioSignal_FromFile
-from AudioUtil.DataStructures.plot import CustomFig
-import sys
 
 def run(signal: np.ndarray, srate):
     print("Starting Midi Output...")
