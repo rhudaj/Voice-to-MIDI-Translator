@@ -88,7 +88,6 @@ def sec2samp(s: float, fs: float) -> int:
 def Normalize(y: np.ndarray):
   return y / y.max()
 
-
 def Envelope(y: np.ndarray, w = 4096) -> np.ndarray:
   analytic_signal = hilbert(y)
   return np.abs(analytic_signal)
@@ -116,7 +115,6 @@ def RemoveDC(y: np.ndarray):
 def mu_law(x, mu=255):
   # map each input value to a value
   return np.sign(x) * np.log(1+mu*np.abs(x)) / np.log(1+mu)
-
 
 # -------------------- STD MATH FUNCTIONS --------------------
 

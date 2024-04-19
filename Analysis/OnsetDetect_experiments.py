@@ -3,7 +3,6 @@ import librosa
 from matplotlib.axes import Axes
 from AudioUtil.DataStructures.AudioSignal import AudioSignal, AudioSignal_FromFile
 from AudioUtil.DataStructures.plot import CustomFig
-from AudioUtil.MusicAnalyze.util import SignalEnvelope
 
 # ------
 

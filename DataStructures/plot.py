@@ -25,6 +25,7 @@ class CustomFig:
     y: np.ndarray,
     label_x: str|None=None,
     label_y: str|None=None,
+    title: str|None = None,
     x_min: int = None,
     x_max: int = None,
     y_min: int = None,
@@ -47,8 +48,12 @@ class CustomFig:
 
     new_ax.set_xlim(left = x_min, right = x_max)
     new_ax.set_ylim(bottom=y_min, top=y_max)
+
     if(label_x): new_ax.set_xlabel(label_x)
     if(label_y): new_ax.set_ylabel(label_y)
+    if(title):
+      new_ax.set_title(title)
+      new_ax.xaxis.labelpad = 50
 
     return new_ax
 

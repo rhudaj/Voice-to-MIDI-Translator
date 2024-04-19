@@ -7,7 +7,7 @@ import AudioUtil.DataStructures.plot as plt
 from AudioUtil.DataStructures.AudioSignal import AudioSignal, AudioSignal_FromFile
 from AudioUtil.DataStructures.plot import CustomFig
 from AudioUtil.MusicAnalyze.util import Envelope
-from AudioUtil.MusicAnalyze.PitchDetection.YINalg import yin
+from AudioUtil.MusicAnalyze.YIN import yin
 
 def CalculateSilenceThreshold(y: np.ndarray):
     '''

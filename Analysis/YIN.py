@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""Pitch-tracking and tuning estimation"""
-
 import numpy as np
 import numba
 from librosa import util

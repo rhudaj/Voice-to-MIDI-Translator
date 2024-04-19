@@ -1,9 +1,14 @@
 import numpy as np
 from scipy.io.wavfile import write, read
-from AudioUtil.MusicAnalyze.util import DecibelToLinear, sec2samp
-import librosa
+from AudioUtil.Analysis.util import DecibelToLinear
 
 class AudioSignal:
+  sample_freq: int
+  n_samples: int
+  time: np.ndarray
+  signal: np.ndarray
+  dtype: np.dtype
+
   def __init__(
     self,
     n_channels,
@@ -23,6 +28,9 @@ class AudioSignal:
 
     self.change_dtype(np.float64)
     self.Normalize()
+
+  def input_from_file(self, file_name: str):
+    pass
 
   def output_wav(self, name: str):
     write(filename=f'{name}.wav', rate=self.sample_freq, data=self.signal)
@@ -60,28 +68,6 @@ class AudioSignal:
 
     print(f'Changed dtype: ${self.dtype} --> ${dtype}')
     self.dtype = dtype
-
-  def FrequencyFilter(self, F_START: float, F_END: float):
-    # get FFT & corresponding frequencies
-    fft = np.fft.fft(self.signal)
-    FSTEP = self.sample_freq / self.n_samples
-    FREQS = np.linspace(0, (self.n_samples - 1) * FSTEP, self.n_samples)  # frequency steps
-
-    # set low freqs to zero
-    i = np.where(FREQS >= F_START)[0][0]
-    fft[0:i] = np.zeros(i, dtype=np.complex_) # array of i zeroes
-
-    # set high freqs to zero
-    i = np.where(FREQS >= F_END)[0][0]
-    filter = np.zeros(FREQS.size - i - 1, dtype=np.complex_)
-    fft[i:fft.size-1] = filter
-
-    # inverse the fft to get OG signal
-    filtered_signal = np.fft.ifft(fft).real
-
-    # RETURN
-    self.signal = filtered_signal
-    return self
 
   def FrequencyGain(self, F_START: float, F_END: float, gainDB: float):
     # get FFT & corresponding frequencies

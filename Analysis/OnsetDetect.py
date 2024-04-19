@@ -1,16 +1,13 @@
 import numpy as np
 import copy
-import math
-import matplotlib.pyplot as pyplot
 import librosa
 import AudioUtil.DataStructures.plot as plt
 from AudioUtil.DataStructures.AudioSignal import AudioSignal, AudioSignal_FromFile
 from AudioUtil.DataStructures.plot import CustomFig
-from AudioUtil.MusicAnalyze.util import StdDeviation, RemoveDC, EmptyArr, sec2samp, Signal_Mean_StdDev
+from AudioUtil.Analysis.util import EmptyArr, sec2samp, Signal_Mean_StdDev
 from scipy.signal import savgol_filter # filter out the noise
-from AudioUtil.MusicAnalyze.PitchDetection.YINalg import yin
-from AudioUtil.MusicAnalyze.PitchDetection.SilenceDetect import DetectSilence
-from sound_to_midi.monophonic import wave_to_midi
+from AudioUtil.Analysis.YIN import yin
+from AudioUtil.Analysis.SilenceDetect import DetectSilence
 
 NONE = 0
 START_TRANSITION = 1
@@ -272,8 +269,6 @@ def GetStatus(SLOPES: np.ndarray, FollowingPitchSlope: np.ndarray, NumSameSlopeD
 
     return STATUS
 
-# ------------
-
 def PitchContour(y: np.ndarray, x: np.ndarray, fs, fmin, fmax) -> tuple[np.ndarray]:
     '''
         PARAMETERS
@@ -286,27 +281,26 @@ def PitchContour(y: np.ndarray, x: np.ndarray, fs, fmin, fmax) -> tuple[np.ndarr
     window_size = frame_length // 2
     hop_length = frame_length // 4
 
-    # PITCH = yin(
-    #     y=y,
-    #     fmin=fmin,
-    #     fmax=fmax,
-    #     sr=fs,
-    #     frame_length=frame_length,
-    #     win_length=window_size,
-    #     hop_length=hop_length,
-    # )
-
-    # PITCH_T, PITCH = Pitch_Contour(y=y, fs=fs, window_size=window_size, overlap_size= window_size-hop_length,fmin=70, fmax=900)
-
-    PITCH, voiced_flag, voiced_prob = librosa.pyin(
+    PITCH = yin(
         y=y,
         fmin=fmin,
         fmax=fmax,
         sr=fs,
         frame_length=frame_length,
         win_length=window_size,
-        hop_length=hop_length
+        hop_length=hop_length,
     )
+
+
+    # PITCH, voiced_flag, voiced_prob = librosa.pyin(
+    #     y=y,
+    #     fmin=fmin,
+    #     fmax=fmax,
+    #     sr=fs,
+    #     frame_length=frame_length,
+    #     win_length=window_size,
+    #     hop_length=hop_length
+    # )
 
     # Calculate the Times for each frame
 
@@ -317,9 +311,7 @@ def PitchContour(y: np.ndarray, x: np.ndarray, fs, fmin, fmax) -> tuple[np.ndarr
 
     return [PITCH_T, PITCH]
 
-#-------------
-
-def PitchDetectAlg(AS: AudioSignal, plotIt=False):
+def pitch_and_onset_detection(AS: AudioSignal, plotIt=False):
 
     # from signal
         x = AS.time
@@ -430,47 +422,4 @@ AS: AudioSignal = AudioSignal_FromFile(f'../SampleInput/{name}.wav')
 y: np.ndarray = AS.signal
 t = AS.time
 fs = AS.sample_freq
-
-def TestMainAlg():
-  PitchDetectAlg(AS, plotIt=True)
-
-def PitchTest():
-    global y, t, fs
-    # y = savgol_filter(y, 256, 2)
-    # PITCH_T, PITCH = PitchContour(y, t, fs, 65, 900)
-    #PITCH = ToNearestNotes(PITCH)
-    #MEAN, DEVS = Signal_Mean_StdDev(PITCH, n=40)
-    #MEAN_SLOPE = np.gradient(MEAN, PITCH_T)
-
-    FIG = CustomFig()
-    axes = FIG.plot_bottom(x=PITCH_T, y=PITCH, label_x='Time(s)', label_y='Pitch')
-    # P2 = RemoveQuickPitchChange(PITCH, PITCH_T, 0.15)
-    # axes.plot(PITCH_T, P2 + 40, color='orange')
-    SP = Stretch(pitches=PITCH, maxPitch=900)
-    axes.plot(PITCH_T, SP + 40, color='red')
-
-    axes.plot(PITCH_T, MAX + 500, color='purple')
-
-    FIG.show()
-
-def PipTrack():
-    global y, t, fs
-
-    pitches, mags = librosa.piptrack(
-        y=y,
-    )
-
-    print(pitches.shape)
-    # pyplot.imshow(pitches, aspect="auto", interpolation="nearest", origin="lower")
-    # pyplot.imshow(mags[:100, :], aspect="auto", interpolation="nearest", origin="lower")
-    # pyplot.plot(np.tile(np.arange(pitches.shape[1]), [100, 1]).T, pitches[:100, :].T, '.')
-    pyplot.imshow(mags, cmap='magma')
-    pyplot.title( "Pitches" )
-    pyplot.xlabel('Time (s)')
-    pyplot.ylabel('Frequency Bins')
-    pyplot.colorbar()
-    pyplot.show()
-
-
-
-TestMainAlg()
+pitch_and_onset_detection(AS, plotIt=True)
