@@ -1,6 +1,6 @@
 # To Run
 
-1. Install the neccessary dependencies 
+1. Install the neccessary [dependencies](#Dependencies) 
 2. ```cd AudioUtil```
 3. ```python3 main.py <file-name>```
 
