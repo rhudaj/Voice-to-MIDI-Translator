@@ -29,11 +29,12 @@ Run the main script with:
 ```bash
 python main.py --input <path-to-input-file> --output <output-path> --DEBUG
 ```
+
 Options:
 
---input: Path to the input audio file
---output: Path for the output MIDI *(.mid)* file
---DEBUG: (optional) enabled debug mode, which logs out more detailed messages to the console.
+- --input: Path to the input audio file
+- --output: Path for the output MIDI *(.mid)* file
+- --DEBUG: (optional) enabled debug mode, which logs out more detailed messages to the console.
 
 ## How It Works
 

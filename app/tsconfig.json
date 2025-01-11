@@ -1,0 +1,33 @@
+{
+    "compilerOptions": {
+        "target": "es2020",
+        "lib": ["dom", "dom.iterable", "esnext"],
+        "allowJs": true,
+        "skipLibCheck": true,
+        "esModuleInterop": true,
+        "allowSyntheticDefaultImports": true,
+        // "strict": true,
+        "forceConsistentCasingInFileNames": true,
+        "noFallthroughCasesInSwitch": true,
+        "module": "esnext",
+        "moduleResolution": "node",
+        "resolveJsonModule": false, // ***
+        "isolatedModules": false, // ***
+        "noEmit": true,
+        "jsx": "react-jsx"
+    },
+    "include": ["src", "sharedTypes.ts"]
+}
+// {
+//     "compilerOptions": {
+//       "module": "NodeNext", // to work with "type: module"
+//       "moduleResolution": "NodeNext", // determines how typescript will find code that you import
+//       "target": "ES2020", // version of JS compiling to
+//       "sourceMap": true, // helps for debugging
+//       "rootDir": "src", // tells typescript compiler where to find the source files
+//       "outDir": "dist", // output dir of compiled JS
+//       "resolveJsonModule": true,
+//       "esModuleInterop": true,
+//       "skipLibCheck": true
+//     },
+// }

@@ -353,7 +353,7 @@ def pianoroll_2_MidiFile(pianoroll: list[NoteInfo], bpm: float, Qfraction=1/4) -
 
 #---------------------- MAIN FUNCTION
 
-def signal_to_midi(inputPath: str, debug_mode=False) -> midiutil.MIDIFile():
+def signal_to_midi(audio_signal: np.ndarray, srate = float, debug_mode=False) -> midiutil.MIDIFile():
     """
     Converts an audio signal to a MIDI file
     :param audio_signal (np.array):            Array containing audio samples
@@ -367,12 +367,6 @@ def signal_to_midi(inputPath: str, debug_mode=False) -> midiutil.MIDIFile():
     else:
         sys.stdout = open(os.devnull, 'w')
         sys.stderr = open(os.devnull, 'w')
-
-    # setup the required data structure for the input file
-
-    AS: AudioSignal = AudioSignal_FromFile(inputPath)
-    audio_signal: np.ndarray = AS.signal
-    srate = AS.sample_freq
 
     # setup the analysis data structures
 
