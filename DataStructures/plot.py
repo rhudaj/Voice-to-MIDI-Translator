@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.axes._axes import Axes
 from matplotlib import gridspec
-from AudioUtil.DataStructures.note_list import NOTE_FREQS
+from  DataStructures.note_list import NOTE_FREQS
 
 id = 0
 

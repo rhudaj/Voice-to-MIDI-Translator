@@ -3,11 +3,11 @@ import copy
 import math
 import matplotlib.pyplot as pyplot
 import librosa
-import AudioUtil.DataStructures.plot as plt
-from AudioUtil.DataStructures.AudioSignal import AudioSignal, AudioSignal_FromFile
-from AudioUtil.DataStructures.plot import CustomFig
-from AudioUtil.MusicAnalyze.util import Envelope
-from AudioUtil.MusicAnalyze.YIN import yin
+import DataStructures.plot as plt
+from  DataStructures.AudioSignal import AudioSignal, AudioSignal_FromFile
+from  DataStructures.plot import CustomFig
+from  MusicAnalyze.util import Envelope
+from  MusicAnalyze.YIN import yin
 
 def CalculateSilenceThreshold(y: np.ndarray):
     '''

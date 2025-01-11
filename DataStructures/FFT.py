@@ -1,6 +1,6 @@
-import AudioUtil.DataStructures.plot as plt
+import DataStructures.plot as plt
 import numpy as np
-from AudioUtil.DataStructures.AudioSignal import AudioSignal
+from  DataStructures.AudioSignal import AudioSignal
 from scipy.signal import find_peaks
 from librosa.util import peak_pick
 #---------------------------------------------

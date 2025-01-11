@@ -1,29 +1,43 @@
 #python imports
-import sys
+import argparse # to parse cmd-line args
+import os, sys
 #external imports
 from midiutil import MIDIFile
-import numpy as np
 #internal imports
-from AudioUtil.MidiOutput.MidiOut import signal_to_midi
-from AudioUtil.DataStructures.AudioSignal import AudioSignal, AudioSignal_FromFile
+from MidiOutput.MidiOut import signal_to_midi
+from DataStructures.AudioSignal import AudioSignal, AudioSignal_FromFile
 
-def run(signal: np.ndarray, srate):
-    print("Starting Midi Output...")
-    midi:  MIDIFile = signal_to_midi(signal, srate=srate)
-    print("Conversion finished!")
-    with open ('MidiOutput/MidiOut.mid', 'wb') as file:
-        midi.writeFile(file)
-    print("Done Midi Output!")
+def main():
 
+    # 1) parse command line arguments:
 
-try:
-    scriptName, fileName =  sys.argv
-except:
-    print("Error. Expected 1 argument: <fileName>")
-    exit(1)
-else:
-    AS: AudioSignal = AudioSignal_FromFile(f'SampleInput/{fileName}.wav')
+    parser = argparse.ArgumentParser(description="Convert voice audio input to MIDI format.")
+
+    parser.add_argument("--input", type=str, required=True, help="Path to the input audio file (.wav)")
+    parser.add_argument("--output", type=str, required=True, help="Path for the output MIDI file (.mid)")
+    parser.add_argument("--DEBUG", action="store_true", help="Enable debug mode for detailed output")
+
+    args = parser.parse_args()
+
+    # 2) Validate arguments
+
+    # validate input file existence
+    if not os.path.isfile(args.input):
+        parser.error(f"The input file '{args.input}' does not exist.")
+
+    # 3) do the transformation
+
     print("Starting conversion to MIDI...")
-    run(signal=AS.signal, srate=AS.sample_freq)
-    sys.stdout = sys.__stdout__
-    print("DONE. MidiOut.mid file has been created in /MidiOutput")
+
+    midi:  MIDIFile = signal_to_midi(args.input, args.DEBUG)
+
+    print("Conversion finished!")
+    print("Starting Midi Output...")
+
+    with open (args.output, 'wb') as file:
+        midi.writeFile(file)
+
+    print(f"DONE. .mid file has been created at: {args.output}")
+
+if __name__ == "__main__":
+    main()

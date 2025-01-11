@@ -27,13 +27,13 @@ pip install -r requirements.txt
 Run the main script with:
 
 ```bash
-python main.py --input <path-to-input-file> --output <output-path> --note_min E2 --note_max B5
+python main.py --input <path-to-input-file> --output <output-path> --DEBUG
 ```
 Options:
 
 --input: Path to the input audio file
 --output: Path for the output MIDI *(.mid)* file
---note_min and --note_max: Range of notes to detect (optional; defaults to E2 and B5)
+--DEBUG: (optional) enabled debug mode, which logs out more detailed messages to the console.
 
 ## How It Works
 

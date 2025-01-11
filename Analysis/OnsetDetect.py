@@ -1,13 +1,13 @@
 import numpy as np
 import copy
 import librosa
-import AudioUtil.DataStructures.plot as plt
-from AudioUtil.DataStructures.AudioSignal import AudioSignal, AudioSignal_FromFile
-from AudioUtil.DataStructures.plot import CustomFig
-from AudioUtil.Analysis.util import EmptyArr, sec2samp, Signal_Mean_StdDev
+import DataStructures.plot as plt
+from  DataStructures.AudioSignal import AudioSignal, AudioSignal_FromFile
+from  DataStructures.plot import CustomFig
+from  Analysis.util import EmptyArr, sec2samp, Signal_Mean_StdDev
 from scipy.signal import savgol_filter # filter out the noise
-from AudioUtil.Analysis.YIN import yin
-from AudioUtil.Analysis.SilenceDetect import DetectSilence
+from  Analysis.YIN import yin
+from  Analysis.SilenceDetect import DetectSilence
 
 NONE = 0
 START_TRANSITION = 1

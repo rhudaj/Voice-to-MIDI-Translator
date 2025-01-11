@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.io.wavfile import write, read
-from AudioUtil.Analysis.util import DecibelToLinear
+from  Analysis.util import DecibelToLinear
 
 class AudioSignal:
   sample_freq: int

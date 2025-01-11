@@ -6,7 +6,7 @@ from numpy import ndarray
 import librosa
 from scipy import signal as sg
 # ----- INTERNAL
-from AudioUtil.DataStructures.plot import CustomFig
+from  DataStructures.plot import CustomFig
 from scipy.signal import hilbert
 # -------------------- Creating / Modifying (Audio Only) Signals --------------------
 

@@ -2,17 +2,12 @@
 import sys
 from enum import Enum
 import os
+# internal
+from DataStructures.AudioSignal import AudioSignal, AudioSignal_FromFile
 # external
 import numpy as np
 import midiutil
 import librosa # note_to_hz, note_to_midi, pyin, pitch_tuning, hz_to_midi, times_like, midi_to_note, sequence.viterbi, beat.tempo
-
-DEBUG = False
-
-if DEBUG:   sys.stdout = sys.__stdout__
-else:
-    sys.stdout = open(os.devnull, 'w')
-    sys.stderr = open(os.devnull, 'w')
 
 class Settings:
     # USER SET CONSTANTS
@@ -41,7 +36,7 @@ class Settings:
             n_notes = midi_max - midi_min + 1
             n_states = n_notes * 2 + 1
 
-# ------------ CLASSES ------------
+# ------------ HELPER OBJECTS ------------
 
 class NoteInfo:
     onset_time: float
@@ -120,7 +115,7 @@ def compare(pianoroll: list[NoteInfo]):
 
 #----------------------
 
-def state_transition_matrix() -> np.ndarray:
+def state_transition_matrix(debug_mode) -> np.ndarray:
     """
     Returns the transition matrix with 1 silence state and 2 states (onset and sustain) for each note.
     This matrix mixes an acoustic model with two states with an uniform-transition linguistic model.
@@ -156,7 +151,7 @@ def state_transition_matrix() -> np.ndarray:
                 S3 = note2state(j)
                 TRANSITIONS[S2, S3] = p_stop_note
 
-    if DEBUG:
+    if debug_mode:
         print('state_transition_matrix:')
         print(f'\t n_notes = {S.n_notes}')
 
@@ -356,17 +351,34 @@ def pianoroll_2_MidiFile(pianoroll: list[NoteInfo], bpm: float, Qfraction=1/4) -
         )
     return midi
 
-def signal_to_midi(audio_signal: np.ndarray, srate: int) -> midiutil.MIDIFile():
-    """Converts an audio signal to a MIDI file
-    Args:
-        audio_signal (np.array):            Array containing audio samples
-    Returns:
-        midi (midiutil.MIDIFile): A MIDI file that can be written to disk.
+#---------------------- MAIN FUNCTION
+
+def signal_to_midi(inputPath: str, debug_mode=False) -> midiutil.MIDIFile():
     """
+    Converts an audio signal to a MIDI file
+    :param audio_signal (np.array):            Array containing audio samples
+    :returns midiutil.MIDIFile: A MIDI file that can be written to disk.
+    """
+
+    # if the user specified debug_mode = true, they want to see the print messages:
+
+    if debug_mode:
+        sys.stdout = sys.__stdout__
+    else:
+        sys.stdout = open(os.devnull, 'w')
+        sys.stderr = open(os.devnull, 'w')
+
+    # setup the required data structure for the input file
+
+    AS: AudioSignal = AudioSignal_FromFile(inputPath)
+    audio_signal: np.ndarray = AS.signal
+    srate = AS.sample_freq
+
+    # setup the analysis data structures
 
     S = Settings()
 
-    TRANSITIONS = state_transition_matrix()
+    TRANSITIONS = state_transition_matrix(debug_mode)
 
     PROBS = prior_probabilities(audio_signal, srate)
 
@@ -387,6 +399,9 @@ def signal_to_midi(audio_signal: np.ndarray, srate: int) -> midiutil.MIDIFile():
     print(f'\t bpm = {bpm}')
 
     midi = pianoroll_2_MidiFile(pianoroll, bpm, S.note_fraction)
+
+    sys.stdout = sys.__stdout__
+    sys.stderr = sys.__stderr__
 
     # RETURN
     return midi

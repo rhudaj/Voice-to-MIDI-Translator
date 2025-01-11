@@ -1,8 +1,8 @@
 import numpy as np
 import librosa
 from matplotlib.axes import Axes
-from AudioUtil.DataStructures.AudioSignal import AudioSignal, AudioSignal_FromFile
-from AudioUtil.DataStructures.plot import CustomFig
+from DataStructures.AudioSignal import AudioSignal, AudioSignal_FromFile
+from DataStructures.plot import CustomFig
 
 # ------
 
