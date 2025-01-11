@@ -2,8 +2,7 @@
 # Edit at https://www.toptal.com/developers/gitignore?templates=python
 
 ### ADDED ###
-test.py
-!main.py
+.DS_Store
 
 ### Python ###
 # Byte-compiled / optimized / DLL files
